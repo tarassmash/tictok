@@ -64,6 +64,9 @@
   .scene textarea { min-height:60px; }
   .scene .btns { display:flex; gap:6px; margin-top:8px; }
   .scene .btns button, .scene .btns label { flex:1; padding:9px 6px; font-size:12px; background:#e3e3e9; color:#111; border-radius:999px; text-align:center; font-weight:700; cursor:pointer; }
+  .uk { margin:6px 2px 0; padding:8px 10px; background:#fff8db; border-radius:10px; font-size:12px; line-height:1.45; color:#5c4a00; }
+  .uk .ukflag { margin-right:4px; }
+  .uk .ukbtn { display:block; margin-top:6px; padding:6px 10px; font-size:11px; background:#ffe680; color:#5c4a00; border-radius:999px; }
   .scene details { margin-top:6px; } .scene summary { cursor:pointer; color:var(--muted); font-weight:700; }
 
   .prodbox { margin-top:14px; border:2px dashed var(--line); border-radius:18px; padding:12px 14px; }
@@ -890,7 +893,7 @@ Rules:
 ${hasProduct ? `- Real photos of the product are available and will be inserted into scenes marked "product": true. Mark 2–4 scenes where the product should be clearly visible (always the solution/result scene and the call-to-action scene). In those image prompts describe how and where the product is shown (in hands, on a table, in use, hero shot) but NOT its design — the photo defines how it looks. Mark all other scenes "product": false.` : '- Set "product": true for scenes where the advertised product itself should be clearly visible, false otherwise.'}
 ${hooks ? '- Also write 2 alternative versions of scene 1 in "hooks" — completely different hook angles (for example: a shocking question, a bold result/claim, a relatable everyday pain), each must flow naturally into scene 2. They will be A/B tested against scene 1.' : ''}
 - Be truthful to what the website really offers. No fake statistics, fake reviews, prices or brand logos that are not on the site.
-- Spoken text, captions, outro texts and descriptions in language: ${lang}. Image, motion and music prompts in English.
+- Spoken text, captions, outro texts and descriptions in language: ${lang}. Image, motion and music prompts in English.${lang !== 'Ukrainian' ? '\n- For every scene and hook also add "voice_uk" and "caption_uk": accurate Ukrainian translations of "voice" and "caption" (only so the operator understands the ad; they are not shown in the video).' : ''}
 
 Return ONLY this JSON object:
 {
@@ -901,9 +904,9 @@ Return ONLY this JSON object:
       "caption": "short punchy on-screen headline, max 5 words, different from the voice line",
       "image": "English, detailed image prompt for exactly this moment: shot type, subject, action, setting, emotion, lighting",
       "motion": "English, one short sentence describing natural motion for animating this image into a 5 second clip (subject movement + camera move)",
-      "product": false
+      "product": false${lang !== 'Ukrainian' ? ',\n      "voice_uk": "Ukrainian translation of voice",\n      "caption_uk": "Ukrainian translation of caption"' : ''}
     }
-  ],${hooks ? '\n  "hooks": [ { "voice": "...", "caption": "...", "image": "...", "motion": "...", "product": false }, { "voice": "...", "caption": "...", "image": "...", "motion": "...", "product": false } ],' : ''}
+  ],${hooks ? '\n  "hooks": [ { "voice": "...", "caption": "...", "image": "...", "motion": "...", "product": false' + (lang !== 'Ukrainian' ? ', "voice_uk": "...", "caption_uk": "..."' : '') + ' }, { "voice": "...", "caption": "...", "image": "...", "motion": "...", "product": false' + (lang !== 'Ukrainian' ? ', "voice_uk": "...", "caption_uk": "..."' : '') + ' } ],' : ''}
   "music": "English prompt for instrumental background music matching the ad: genre, mood, tempo in BPM, main instruments, no vocals",
   "outro_title": "big text for the final screen, max 4 words",
   "tiktok": { "outro": "spoken: link in profile, max 10 words", "link_hint": "on-screen, max 4 words", "caption": "TikTok caption with keywords, max 150 chars", "hashtags": ["#a", "#b", "#c", "#d", "#e"] },
@@ -1034,6 +1037,7 @@ function sceneCard(sc, id, label) {
       <input data-sc="${id}" data-f="caption" value="${esc(sc.caption)}">
       <label class="small">Озвучка</label>
       <textarea data-sc="${id}" data-f="voice">${esc(sc.voice)}</textarea>
+      ${ukBox(sc, id)}
       <label class="check" style="margin:6px 0 0 4px"><input type="checkbox" data-scp="${id}" ${sc.product ? 'checked' : ''}> 📦 Настоящий товар в кадре</label>
       <details><summary>Что на картинке и движение</summary>
         <textarea data-sc="${id}" data-f="image" style="margin-top:6px;min-height:90px">${esc(sc.image)}</textarea>
@@ -1080,24 +1084,70 @@ The picture shown in this scene: ${sc.image}
 Current on-screen text: "${sc.caption}"${otherHooks}
 
 Rules: write a fresh, noticeably different version (not a paraphrase of the current one); natural spoken ${ad.lang}, like a real person talking; it must flow naturally from the previous line and into the next one; it must match the picture; truthful, no invented numbers or reviews; voice max 15 words; caption max 5 words, punchy, different from the voice line.
-Return ONLY JSON: {"voice": "...", "caption": "..."}`);
+${needUk() ? 'Also give accurate Ukrainian translations of both in "voice_uk" and "caption_uk".\nReturn ONLY JSON: {"voice": "...", "caption": "...", "voice_uk": "...", "caption_uk": "..."}' : 'Return ONLY JSON: {"voice": "...", "caption": "..."}'}`);
   if (!r || !r.voice) throw new Error('нейросеть не вернула текст');
-  sc.prevText = { voice: sc.voice, caption: sc.caption };
+  sc.prevText = { voice: sc.voice, caption: sc.caption, uk: sc.uk || null, ukFor: sc.ukFor || null };
   sc.voice = String(r.voice).trim();
   sc.caption = String(r.caption || sc.caption).trim();
+  sc.uk = null; sc.ukFor = null;
+  if (r.voice_uk) setUk(sc, r.voice_uk, r.caption_uk);
+}
+
+// ---------- Украинский перевод сцен (чтобы понимать, что говорится в ролике) ----------
+const needUk = () => ad && ad.lang !== 'Ukrainian';
+const ukStale = (sc) => !sc.uk || !sc.ukFor || sc.ukFor.voice !== sc.voice || sc.ukFor.caption !== sc.caption;
+function setUk(sc, voiceUk, captionUk) {
+  if (!voiceUk) return;
+  sc.uk = { voice: String(voiceUk).trim(), caption: String(captionUk || '').trim() };
+  sc.ukFor = { voice: sc.voice, caption: sc.caption };
+}
+function ukBox(sc, id) {
+  if (!needUk()) return '';
+  const stale = ukStale(sc);
+  return `<div class="uk" data-ukbox="${id}">${sc.uk
+    ? `<span class="ukflag">🇺🇦</span>${sc.uk.caption ? `<b>${esc(sc.uk.caption)}</b><br>` : ''}${esc(sc.uk.voice)}`
+    : '<span class="ukflag">🇺🇦</span><i>перекладу ще немає</i>'}
+    ${stale ? `<button type="button" class="ukbtn" data-tr="${id}">${sc.uk ? 'Текст змінився — оновити переклад' : 'Перекласти'}</button>` : ''}</div>`;
+}
+function refreshUkBox(id) {
+  const el = document.querySelector(`[data-ukbox="${id}"]`);
+  if (el) el.outerHTML = ukBox(sceneById(id), id);
+}
+async function translateScenes(list) {
+  const items = list.map(({ sc }, i) => `${i + 1}. caption: "${sc.caption}" | voice: "${sc.voice}"`).join('\n');
+  const r = await llmJSON(`Translate these lines of a video ad from ${ad.lang} into Ukrainian, accurately and naturally, so that a Ukrainian speaker understands exactly what is said. Keep the meaning, tone and any wordplay explanation-free.
+${items}
+Return ONLY JSON: {"items": [{"caption_uk": "...", "voice_uk": "..."}]} with exactly ${list.length} items in the same order.`);
+  (r.items || []).forEach((t, i) => { if (list[i] && t) setUk(list[i].sc, t.voice_uk, t.caption_uk); });
+}
+async function translateAll(onlyStale = true) {
+  if (!needUk()) return;
+  const all = [...ad.scenes.map((sc, i) => ({ sc, id: 's' + i })), ...ad.hooks.slice(1).map((sc, j) => ({ sc, id: 'h' + (j + 1) }))];
+  const list = all.filter(({ sc }) => !onlyStale || ukStale(sc));
+  if (!list.length) return;
+  await translateScenes(list);
+  markDirty();
 }
 
 ['board', 'hookBoard'].forEach((bid) => {
   const root = $(bid);
   root.addEventListener('input', (e) => {
     const el = e.target.closest('[data-sc]');
-    if (el && ad) { sceneById(el.dataset.sc)[el.dataset.f] = el.value; markDirty(); }
+    if (el && ad) { sceneById(el.dataset.sc)[el.dataset.f] = el.value; markDirty(); if (el.dataset.f === 'voice' || el.dataset.f === 'caption') refreshUkBox(el.dataset.sc); }
   });
   root.addEventListener('click', async (e) => {
+    const tr = e.target.closest('[data-tr]');
+    if (tr) {
+      if (!ad || !prepare($('sstatus'))) return;
+      tr.disabled = true; tr.textContent = 'перекладаю…';
+      try { await translateScenes([{ sc: sceneById(tr.dataset.tr) }]); markDirty(); } catch (err) { tr.textContent = 'Не вийшло — ще раз'; tr.disabled = false; return; }
+      refreshUkBox(tr.dataset.tr);
+      return;
+    }
     const u = e.target.closest('[data-undo]');
     if (u && ad) {
       const sc = sceneById(u.dataset.undo);
-      if (sc.prevText) { const cur = { voice: sc.voice, caption: sc.caption }; Object.assign(sc, sc.prevText); sc.prevText = cur; renderBoard(); markDirty(); }
+      if (sc.prevText) { const cur = { voice: sc.voice, caption: sc.caption, uk: sc.uk || null, ukFor: sc.ukFor || null }; Object.assign(sc, sc.prevText); sc.prevText = cur; renderBoard(); markDirty(); }
       return;
     }
     const w = e.target.closest('[data-rewrite]');
@@ -1127,7 +1177,11 @@ Return ONLY JSON: {"voice": "...", "caption": "..."}`);
   });
 });
 
-const toScene = (s, fallbackProduct) => ({ voice: String(s.voice || s.caption || ''), caption: String(s.caption || ''), image: String(s.image || s.voice || ''), motion: String(s.motion || ''), product: s.product !== undefined ? !!s.product : !!fallbackProduct, busy: 'рисую…' });
+const toScene = (s, fallbackProduct) => {
+  const sc = { voice: String(s.voice || s.caption || ''), caption: String(s.caption || ''), image: String(s.image || s.voice || ''), motion: String(s.motion || ''), product: s.product !== undefined ? !!s.product : !!fallbackProduct, busy: 'рисую…' };
+  if (s.voice_uk) setUk(sc, s.voice_uk, s.caption_uk);
+  return sc;
+};
 
 $('mkScript').onclick = async () => {
   const p = prepare($('sstatus'));
@@ -1159,6 +1213,7 @@ $('mkScript').onclick = async () => {
       sc.busy = ''; renderBoard();
       st$(`<span class="spinner"></span>Рисую сцены: ${++done} из ${todo.length}…`);
     }));
+    if (needUk() && allScenes().some(ukStale)) { st$('<span class="spinner"></span>Перекладаю сцени українською…'); try { await translateAll(); renderBoard(); } catch {} }
     const bad = todo.filter((s) => !s.src).length;
     const lostProduct = hasProduct && todo.some((s) => s.product && !s.withProduct && s.src && !s.own);
     st$(bad ? `<span class="err">${bad} сцен не нарисовались — нажмите «🔄 Перерисовать» под ними.</span>`
@@ -1796,7 +1851,7 @@ function markDirty() {
 }
 document.addEventListener('change', (e) => { if (e.target.id && SETTINGS.includes(e.target.id)) markDirty(); });
 
-const packScene = (s) => ({ prevText: s.prevText || null, voice: s.voice, caption: s.caption, image: s.image, motion: s.motion, product: !!s.product, own: !!s.own, withProduct: !!s.withProduct,
+const packScene = (s) => ({ uk: s.uk || null, ukFor: s.ukFor || null, prevText: s.prevText || null, voice: s.voice, caption: s.caption, image: s.image, motion: s.motion, product: !!s.product, own: !!s.own, withProduct: !!s.withProduct,
   remote: s.remote || null, blob: s.blob || null, imgId: s.imgId || null, clipBlob: s.clipBlob || null, clipKey: s.clipKey || null });
 
 async function saveProject() {
@@ -1847,7 +1902,7 @@ async function openProject(id) {
     Object.entries(p.settings || {}).forEach(([id, v]) => { const el = $(id); if (!el || id === 'voice') return; if (el.type === 'checkbox') el.checked = v; else el.value = v; });
     fillVoices(p.settings && p.settings.voice);
     const unpack = async (s) => {
-      const sc = { prevText: s.prevText || null, voice: s.voice, caption: s.caption, image: s.image, motion: s.motion, product: s.product, own: s.own, withProduct: s.withProduct, busy: '', err: '' };
+      const sc = { uk: s.uk || null, ukFor: s.ukFor || null, prevText: s.prevText || null, voice: s.voice, caption: s.caption, image: s.image, motion: s.motion, product: s.product, own: s.own, withProduct: s.withProduct, busy: '', err: '' };
       if (s.blob) {
         sc.src = URL.createObjectURL(s.blob); sc.blob = s.blob; sc.remote = s.remote; sc.imgId = s.imgId || pid();
         sc.imgPromise = createImageBitmap(s.blob).then((b) => (sc.img = b));
@@ -1868,6 +1923,7 @@ async function openProject(id) {
     updateCosts();
     $('projBox').open = false;
   } finally { restoring = false; }
+  if (needUk() && allScenes().some(ukStale) && prepare(document.createElement('div'))) translateAll().then(renderBoard).catch(() => {});
 }
 
 $('projList').addEventListener('click', async (e) => {
