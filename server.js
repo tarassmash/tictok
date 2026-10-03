@@ -6,6 +6,7 @@ import crypto from 'node:crypto';
 import dns from 'node:dns/promises';
 import net from 'node:net';
 import path from 'node:path';
+import fs from 'node:fs';
 import { fileURLToPath } from 'node:url';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -203,8 +204,16 @@ app.get('/api/read', requireAuth, async (req, res) => {
 });
 
 // ---------- страница ----------
-app.use(express.static(path.join(__dirname, 'public'), { maxAge: '1h', index: 'index.html' }));
-app.get('*', (req, res) => res.sendFile(path.join(__dirname, 'public', 'index.html')));
+// index.html может лежать в папке public/ или рядом с server.js (если при загрузке на GitHub папка потерялась)
+const PAGE = [path.join(__dirname, 'public', 'index.html'), path.join(__dirname, 'index.html')].find((p) => fs.existsSync(p));
+if (!PAGE) console.error('❌ Не найден index.html — загрузите его в репозиторий в папку public/ (или рядом с server.js).');
+else console.log(`  Страница: ${path.relative(__dirname, PAGE)}`);
+if (PAGE && PAGE.includes(`${path.sep}public${path.sep}`)) app.use(express.static(path.dirname(PAGE), { maxAge: '1h', index: false }));
+app.get('*', (req, res) => {
+  if (!PAGE) return res.status(500).type('text/plain; charset=utf-8').send('Не найден файл index.html. Загрузите его в репозиторий в папку public/ (или рядом с server.js) и перезапустите деплой.');
+  res.setHeader('Cache-Control', 'no-cache');
+  res.sendFile(PAGE);
+});
 
 app.listen(PORT, '0.0.0.0', () => {
   console.log(`Генератор роликов запущен на порту ${PORT}`);
